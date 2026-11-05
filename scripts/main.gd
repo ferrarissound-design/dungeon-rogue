@@ -205,6 +205,13 @@ func _on_floor_started(n: int) -> void:
 		ui.hud.show_banner("最下層", Color(1.0, 0.4, 0.35), 2.6, "魔王の気配がする…")
 		sfx.play_bgm("boss")
 
+## タブ切り替え・アプリ切り替え時は自動で一時停止
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		if state == State.PLAYING and not autoplay and not touchtest and not take_shots:
+			ui.touch.release_all()
+			toggle_pause()
+
 func toggle_pause() -> void:
 	if state == State.PLAYING:
 		_set_state(State.PAUSED)

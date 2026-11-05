@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ゲームプレイ動画 out/gameplay.mp4 を撮影（DISPLAY=:4、自動プレイ）
-# 1) 地下1階から序盤の探索・戦闘・宝箱  2) 最下層のボス戦  を連結
+# 1) 地下1階の探索・戦闘・宝箱  2) 地下3階（強敵・トゲ罠）  3) 最下層のボス戦  を連結
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export DISPLAY=${DISPLAY:-:4}
@@ -20,8 +20,9 @@ rec() { # $1=出力 $2=秒数 $3...=ゲーム引数
     -vf "scale=1280:-2" -c:v libx264 -preset veryfast -crf 26 -pix_fmt yuv420p "$outf"
   kill $gp 2>/dev/null || true; wait $gp 2>/dev/null || true
 }
-rec /tmp/seg1.mp4 50 --seed=7
-rec /tmp/seg2.mp4 45 --seed=7 --start-floor=5
-printf "file '/tmp/seg1.mp4'\nfile '/tmp/seg2.mp4'\n" > /tmp/segs.txt
+rec /tmp/seg1.mp4 32 --seed=7
+rec /tmp/seg2.mp4 30 --seed=8 --start-floor=3
+rec /tmp/seg3.mp4 42 --seed=7 --start-floor=5
+printf "file '/tmp/seg1.mp4'\nfile '/tmp/seg2.mp4'\nfile '/tmp/seg3.mp4'\n" > /tmp/segs.txt
 ffmpeg -y -loglevel error -f concat -safe 0 -i /tmp/segs.txt -c copy out/gameplay.mp4
 ls -la out/gameplay.mp4
