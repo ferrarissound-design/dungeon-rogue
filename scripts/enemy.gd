@@ -39,6 +39,17 @@ var minion := false
 var target := Vector2.ZERO
 var stagger := 0.0
 var last_pattern := ""
+var elite := false
+
+## 強敵（エリート）化: 体力・攻撃・経験値アップ、倒すと回復薬を必ず落とす
+func make_elite() -> void:
+	elite = true
+	maxhp *= 2.6
+	hp = maxhp
+	dmg *= 1.25
+	spd *= 1.1
+	r *= 1.2
+	xp *= 3
 
 func setup(kind: String, p: Vector2, floor_num: int) -> void:
 	type = kind

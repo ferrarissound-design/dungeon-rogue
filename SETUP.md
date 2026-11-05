@@ -10,6 +10,7 @@
 | レンダラー | gl_compatibility（Web/GPUなし環境向け） |
 | fonttools (pyftsubset) | 4.65.0 |
 | ffmpeg | Debian パッケージ版（動画撮影用） |
+| Playwright (Python) + Chromium headless shell | 1.64.1 / Chromium 156（Web版の自動テスト用、任意） |
 | gh (GitHub CLI) | リポジトリ作成・Pages 設定用 |
 
 ## 一発セットアップ
@@ -51,6 +52,14 @@ godot --headless --path . -s tools/make_icon.gd
 
 # ローカルで Web 版を確認
 python3 -m http.server 8000 -d docs
+
+# Web 版のブラウザ自動テスト（Playwright + Chromium、PC/スマホ横/スマホ縦のタッチ操作を確認）
+python3 -m venv /tmp/pwenv && /tmp/pwenv/bin/pip install playwright && /tmp/pwenv/bin/playwright install --with-deps chromium
+/tmp/pwenv/bin/python tools/web_test.py http://localhost:8000/ out
+/tmp/pwenv/bin/python tools/web_test.py https://ferrarissound-design.github.io/dungeon-rogue/ out/live
+
+# ゲームプレイ動画 out/gameplay.mp4 の撮影（DISPLAY=:4）
+bash tools/record_video.sh
 ```
 
 ## テスト用起動オプション（`--` の後ろに付ける）
@@ -68,6 +77,7 @@ python3 -m http.server 8000 -d docs
 | `--gentest=N` | Nシード×5階のマップ生成検証 |
 | `--touchtest` | タッチ操作の自動テスト（ウィンドウ表示が必要） |
 | `--shots` / `--shot-dir=パス` | 各場面のスクリーンショットを保存（既定 out/） |
+| `--touchui` | PCでもタッチ操作ボタンを表示（撮影用） |
 
 例: `DISPLAY=:4 godot --path . --rendering-driver opengl3 -- --autoplay --god --shots --autoquit --seed=5 --timescale=2`
 

@@ -181,7 +181,7 @@ func _guard(buttons: Array, focus: Button) -> void:
 
 # ---------- 画面構築 ----------
 func _build_title() -> void:
-	var o := _overlay(0.35, false)
+	var o := _overlay(0.62, false)
 	title_layer = o[0]
 	var vb: VBoxContainer = o[1]
 	vb.add_theme_constant_override("separation", 12)

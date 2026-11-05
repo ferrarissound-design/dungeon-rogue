@@ -170,6 +170,7 @@ func go_title() -> void:
 	game.new_run(randi())
 	game.fade = 0.0
 	game.hide_player = true
+	game.queue_redraw()
 	var best := "最速クリア: %s（クリア %d回）" % [_fmt_time(best_time), clears] if best_time > 0.0 else "地下5階に潜む魔王を倒せ！"
 	ui.show_title(best)
 	ui.set_controls_hint(touch_mode)

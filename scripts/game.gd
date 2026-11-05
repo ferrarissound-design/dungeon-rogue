@@ -17,6 +17,7 @@ const PLAYER_R := 5.0
 const MOVE_SPEED := 84.0
 const ROLL_SPEED := 240.0
 const MAX_POTIONS := 5
+const TRAP_CYCLE := 2.6
 
 var sfx
 var rng := RandomNumberGenerator.new()
@@ -72,6 +73,7 @@ var regen_acc := 0.0
 var after_t := 0.0
 
 var enemies: Array = []
+var traps: Array = []        # トゲ罠 {cell, pos, ph}
 var bullets: Array = []
 var chests: Array = []
 var pickups: Array = []
@@ -141,6 +143,7 @@ func start_floor(n: int) -> void:
 	bullets.clear()
 	chests.clear()
 	pickups.clear()
+	traps.clear()
 	particles.clear()
 	texts.clear()
 	slashes.clear()
@@ -216,6 +219,8 @@ func _populate() -> void:
 				used.append(c)
 				var e = Enemy.new()
 				e.setup(_pick_weighted(wt), cell_center(c), floor_num)
+				if floor_num >= 2 and e.type != "bat" and rng.randf() < 0.05 + 0.02 * floor_num:
+					e.make_elite()
 				enemies.append(e)
 		# 宝箱
 		var rooms_idx := []
@@ -233,6 +238,23 @@ func _populate() -> void:
 		var c3: Vector2i = dun.random_cell_in(pr, used)
 		used.append(c3)
 		pickups.append({"kind": "potion", "pos": cell_center(c3), "t": 0.0})
+		# トゲ罠（地下2階から）: 床から周期的にトゲが出る。回避（ローリング）中は無敵で通り抜けられる
+		if floor_num >= 2:
+			rooms_idx.shuffle()
+			var ngroups := mini(1 + floor_num, rooms_idx.size())
+			for gi in ngroups:
+				var rr: Rect2i = dun.rooms[rooms_idx[gi]]
+				var base: Vector2i = dun.random_cell_in(rr, used)
+				var horiz := rng.randf() < 0.5
+				var ph := rng.randf() * TRAP_CYCLE
+				for k in rng.randi_range(2, 4):
+					var tc := base + (Vector2i(k, 0) if horiz else Vector2i(0, k))
+					if not dun.is_floor(tc) or used.has(tc) or not rr.has_point(tc):
+						break
+					used.append(tc)
+					traps.append({"cell": tc, "pos": cell_center(tc), "ph": ph + k * 0.12})
+					if astar != null:
+						astar.set_point_weight_scale(tc, 6.0)
 	else:
 		# ボス階: スタート部屋に良い宝箱と回復薬、ボス部屋にボス
 		var sr: Rect2i = dun.rooms[0]
@@ -429,6 +451,7 @@ func step(dt: float) -> void:
 			start_floor(floor_num + 1)
 		return
 	_update_player(dt)
+	_update_traps()
 	flow_t -= dt
 	if flow_t <= 0.0:
 		flow_t = 0.25
@@ -618,6 +641,10 @@ func _kill(e) -> void:
 				burst(o.pos, Color(0.9, 0.9, 0.95), 10, 80.0)
 		bullets.clear()
 		return
+	if e.elite:
+		burst(e.pos, Color(1.0, 0.8, 0.3), 18, 110.0)
+		pickups.append({"kind": "potion", "pos": e.pos, "t": 0.0})
+		message.emit("強敵を倒した！", Color(1.0, 0.85, 0.3))
 	if not e.minion:
 		gain_xp(e.xp)
 		var r := randf()
@@ -625,6 +652,26 @@ func _kill(e) -> void:
 			pickups.append({"kind": "potion", "pos": e.pos, "t": 0.0})
 		elif r < 0.22:
 			pickups.append({"kind": "heart", "pos": e.pos, "t": 0.0})
+
+## 罠の状態: 0=引っ込み 1=予兆 2=トゲが出ている
+func trap_state(tr: Dictionary) -> int:
+	var c := fmod(time + tr["ph"], TRAP_CYCLE)
+	if c > 1.9:
+		return 2
+	if c > 1.45:
+		return 1
+	return 0
+
+func _update_traps() -> void:
+	if traps.is_empty() or not alive:
+		return
+	for tr in traps:
+		if trap_state(tr) != 2:
+			continue
+		var d: Vector2 = (ppos - tr["pos"]).abs()
+		if d.x < T * 0.5 - 2.0 and d.y < T * 0.5 - 2.0:
+			hurt_player(5.0 * (1.0 + 0.3 * (floor_num - 1)), tr["pos"])
+			break
 
 func hurt_player(amount: float, src: Vector2) -> void:
 	if not alive or iframes > 0.0 or trans_t > 0.0:
@@ -936,6 +983,25 @@ func _draw() -> void:
 			draw_rect(Rect2(r.position + Vector2(0, i * 4 + 3), Vector2(16, 1)), Color(0.1, 0.1, 0.12))
 		var gl := 0.5 + 0.5 * sin(time * 3.0)
 		draw_rect(r.grow(2 + gl * 2), Color(0.4, 1.0, 0.6, 0.25 + gl * 0.25), false, 1.0)
+	# トゲ罠
+	for tr in traps:
+		if not vr.has_point(tr["pos"]):
+			continue
+		var tp: Vector2 = tr["pos"] - Vector2(7, 7)
+		draw_rect(Rect2(tp, Vector2(14, 14)), Color(0.12, 0.1, 0.13))
+		draw_rect(Rect2(tp, Vector2(14, 14)), Color(0.3, 0.27, 0.3), false, 1.0)
+		var ts := trap_state(tr)
+		for iy in 3:
+			for ix in 3:
+				var hp2: Vector2 = tp + Vector2(2.5 + ix * 4.5, 3.0 + iy * 4.5)
+				if ts == 0:
+					draw_rect(Rect2(hp2 - Vector2(1, 0), Vector2(2, 1.5)), Color(0.03, 0.03, 0.04))
+				else:
+					var hgt := 2.0 if ts == 1 else 5.0
+					var col := Color(0.6, 0.6, 0.65) if ts == 1 else Color(0.9, 0.9, 0.95)
+					draw_colored_polygon(PackedVector2Array([hp2 + Vector2(-1.5, 1.5), hp2 + Vector2(1.5, 1.5), hp2 + Vector2(0, 1.5 - hgt)]), col)
+		if ts == 2:
+			draw_rect(Rect2(tp, Vector2(14, 14)), Color(1.0, 0.3, 0.25, 0.18))
 	# 予告線など
 	for e in enemies:
 		if e.dead or not vr.has_point(e.pos):
@@ -1091,13 +1157,21 @@ func _draw_enemy(e) -> void:
 	var sc := 1.0
 	if e.spawn_t > 0.0:
 		mod.a = 1.0 - e.spawn_t / 0.5
+	if e.elite:
+		sc = 1.3
+		var pr := 0.5 + 0.5 * sin(e.anim * 5.0)
+		draw_set_transform(p + Vector2(0, 4), 0.0, Vector2(1.0, 0.45))
+		draw_circle(Vector2.ZERO, 11.0 + pr * 2.0, Color(1.0, 0.75, 0.2, 0.22 + 0.15 * pr))
+		draw_arc(Vector2.ZERO, 11.0 + pr * 2.0, 0.0, TAU, 24, Color(1.0, 0.85, 0.35, 0.7), 1.0)
+		draw_set_transform(Vector2.ZERO)
+		mod = mod * Color(1.0, 0.92, 0.75)
 	match e.type:
 		"slime":
 			var cyc := fmod(e.anim, 0.9)
 			var hop := sin(clampf(cyc / 0.45, 0.0, 1.0) * PI) * 4.0 if e.aggro else 0.0
 			_shadow(p + Vector2(0, 4), 6.0)
 			var sq := 1.0 + sin(e.anim * 6.0) * 0.06
-			draw_set_transform(p + Vector2(0, 5 - hop), 0.0, Vector2((1.0 / sq) * (-1.0 if flip else 1.0), sq))
+			draw_set_transform(p + Vector2(0, 5 - hop), 0.0, Vector2((1.0 / sq) * (-1.0 if flip else 1.0), sq) * sc)
 			draw_texture(Art.white("slime") if e.flash > 0.0 else Art.tex("slime"), Vector2(-8, -16), mod)
 			draw_set_transform(Vector2.ZERO)
 			return
@@ -1124,10 +1198,11 @@ func _draw_enemy(e) -> void:
 		draw_circle(p + Vector2(0, -4), 8.0 + sin(e.t * 20.0) * 1.5, Color(0.7, 0.3, 1.0, 0.3))
 	var bob: float = absf(sin(e.anim * 8.0)) * 1.0 if e.mv.length() > 5.0 else 0.0
 	_spr(e.tex, p + Vector2(0, 5 - bob) + off, flip, e.flash > 0.0, mod, sc)
-	if e.hp < e.maxhp and e.type != "boss":
-		var w := 12.0
-		draw_rect(Rect2(p + Vector2(-w * 0.5, -15), Vector2(w, 2)), Color(0, 0, 0, 0.7))
-		draw_rect(Rect2(p + Vector2(-w * 0.5, -15), Vector2(w * e.hp / e.maxhp, 2)), Color(0.95, 0.3, 0.3))
+	if (e.hp < e.maxhp or e.elite) and e.type != "boss":
+		var w := 18.0 if e.elite else 12.0
+		var hy := -20.0 if e.elite else -15.0
+		draw_rect(Rect2(p + Vector2(-w * 0.5, hy), Vector2(w, 2)), Color(0, 0, 0, 0.7))
+		draw_rect(Rect2(p + Vector2(-w * 0.5, hy), Vector2(w * e.hp / e.maxhp, 2)), Color(1.0, 0.75, 0.2) if e.elite else Color(0.95, 0.3, 0.3))
 
 func _draw_boss(e) -> void:
 	var p: Vector2 = e.pos
