@@ -9,6 +9,7 @@ extends Node
 ##   --autoquit        リザルト画面が出たら終了（終了コード 0=クリア 2=ゲームオーバー）
 ##   --gentest=N       N個のシード×全階層のマップ生成を検証して終了
 ##   --touchtest       タッチ入力の自己テスト
+##   --facingtest      主人公の向き（キーボード/ゲームパッド/タッチ/攻撃/回避）の自己テスト。--shots で facing_*.png を保存
 ##   --shots           スクリーンショットを out/ に保存
 ##   --start-floor=N   N階から開始
 ##   --maxtime=SEC     実時間の上限（超えたら終了コード 3）
@@ -41,6 +42,7 @@ var timescale := 1.0
 var autoquit := false
 var gentest := 0
 var touchtest := false
+var facingtest := false
 var take_shots := false
 var start_floor := 1
 var maxtime := 0.0
@@ -87,6 +89,8 @@ func _ready() -> void:
 	go_title()
 	if touchtest:
 		_run_touchtest()
+	elif facingtest:
+		_run_facingtest()
 
 func _parse_args() -> void:
 	shot_dir = ProjectSettings.globalize_path("res://out")
@@ -97,6 +101,7 @@ func _parse_args() -> void:
 		elif a == "--weak": weak = true
 		elif a == "--autoquit": autoquit = true
 		elif a == "--touchtest": touchtest = true
+		elif a == "--facingtest": facingtest = true
 		elif a == "--shots": take_shots = true
 		elif a.begins_with("--seed="): seed_arg = v.to_int()
 		elif a.begins_with("--timescale="): timescale = v.to_float()
@@ -208,7 +213,7 @@ func _on_floor_started(n: int) -> void:
 ## タブ切り替え・アプリ切り替え時は自動で一時停止
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
-		if state == State.PLAYING and not autoplay and not touchtest and not take_shots:
+		if state == State.PLAYING and not autoplay and not touchtest and not facingtest and not take_shots:
 			ui.touch.release_all()
 			toggle_pause()
 
@@ -546,4 +551,99 @@ func _run_touchtest() -> void:
 		print("TOUCHTEST ", "PASS" if r[1] else "FAIL", " - ", r[0])
 		all_ok = all_ok and r[1]
 	print("TOUCHTEST RESULT: ", "ALL PASS" if all_ok else "FAILED")
+	get_tree().quit(0 if all_ok else 1)
+
+# ---------- 向きの自己テスト ----------
+const FACE_DIRS := {"right": Vector2.RIGHT, "left": Vector2.LEFT, "up": Vector2.UP, "down": Vector2.DOWN}
+const FACE_ACTIONS := {"right": "move_right", "left": "move_left", "up": "move_up", "down": "move_down"}
+
+func _facing_ok(dname: String) -> bool:
+	var d: int = game.player_dir()
+	var flip: bool = game.pface.x < -0.1 and d == 2
+	match dname:
+		"right": return d == 2 and not flip and game.player_sprite().begins_with("player_side")
+		"left": return d == 2 and flip and game.player_sprite().begins_with("player_side")
+		"up": return d == 1 and game.player_sprite() == "player_up"
+		"down": return d == 0 and game.player_sprite() == "player"
+	return false
+
+func _joy_axis(axis: int, v: float) -> void:
+	var ev := InputEventJoypadMotion.new()
+	ev.device = 0
+	ev.axis = axis
+	ev.axis_value = v
+	Input.parse_input_event(ev)
+
+func _run_facingtest() -> void:
+	var results := []
+	await _frames(30)
+	start_game()
+	game.god = true
+	for e in game.enemies:
+		e.dead = true
+	await _frames(170)  # 階層名の表示が消えるまで待つ
+	var vs := get_viewport().get_visible_rect().size
+	var order := ["right", "down", "left", "up"]
+	# 1) キーボード（アクション）: 押している間その方向、離しても向きを保持
+	for dn in order:
+		Input.action_press(FACE_ACTIONS[dn])
+		await _frames(12)
+		var moving_ok := _facing_ok(dn)
+		Input.action_release(FACE_ACTIONS[dn])
+		await _frames(15)
+		results.append(["キーボード %s（移動中=%s / 停止後も保持=%s）" % [dn, moving_ok, _facing_ok(dn)], moving_ok and _facing_ok(dn)])
+		if take_shots:
+			_shot("facing_" + dn)
+			await _frames(3)
+	# 2) ゲームパッド左スティック
+	for dn in order:
+		var v: Vector2 = FACE_DIRS[dn]
+		_joy_axis(JOY_AXIS_LEFT_X, v.x)
+		_joy_axis(JOY_AXIS_LEFT_Y, v.y)
+		await _frames(12)
+		_joy_axis(JOY_AXIS_LEFT_X, 0.0)
+		_joy_axis(JOY_AXIS_LEFT_Y, 0.0)
+		await _frames(10)
+		results.append(["ゲームパッド %s" % dn, _facing_ok(dn)])
+	# 3) タッチスティック
+	var o := Vector2(vs.x * 0.2, vs.y * 0.7)
+	for dn in order:
+		var v2: Vector2 = FACE_DIRS[dn]
+		_touch(0, o, true)
+		await _frames(2)
+		for i in 10:
+			_drag(0, o + v2 * (i + 1) * 6.0, v2 * 6.0)
+			await _frames(1)
+		await _frames(6)
+		_touch(0, o + v2 * 60.0, false)
+		await _frames(10)
+		results.append(["タッチスティック %s" % dn, _facing_ok(dn)])
+	# 4) 攻撃中は攻撃方向を向く（左を向いて攻撃 → 左のまま）
+	Input.action_press("move_left")
+	await _frames(6)
+	Input.action_release("move_left")
+	Input.action_press("attack")
+	await _frames(3)
+	Input.action_release("attack")
+	var sw_ok: bool = game.swing_t > 0.0 and _facing_ok("left")
+	await _frames(20)
+	results.append(["攻撃中も攻撃方向（左）を向く", sw_ok])
+	# 5) 回避: 上を向いた状態で右に入力しながら回避 → 回避方向（右）を向く
+	Input.action_press("move_up")
+	await _frames(6)
+	Input.action_release("move_up")
+	await _frames(20)
+	Input.action_press("move_right")
+	Input.action_press("dodge")
+	await _frames(3)
+	var roll_ok: bool = game.roll_t > 0.0 and _facing_ok("right")
+	Input.action_release("dodge")
+	Input.action_release("move_right")
+	await _frames(30)
+	results.append(["回避中は回避方向（右）を向く", roll_ok])
+	var all_ok := true
+	for r in results:
+		print("FACINGTEST ", "PASS" if r[1] else "FAIL", " - ", r[0])
+		all_ok = all_ok and r[1]
+	print("FACINGTEST RESULT: ", "ALL PASS" if all_ok else "FAILED")
 	get_tree().quit(0 if all_ok else 1)

@@ -514,7 +514,7 @@ func _update_player(dt: float) -> void:
 		after_t -= dt
 		if after_t <= 0.0:
 			after_t = 0.035
-			afterimages.append({"pos": ppos, "life": 0.18, "flip": pface.x < 0})
+			afterimages.append({"pos": ppos, "life": 0.18, "flip": pface.x < 0 and player_dir() == 2, "spr": player_sprite()})
 	else:
 		v = mvin * MOVE_SPEED * (1.0 + st["spd"])
 		if swing_t > 0.0:
@@ -1032,7 +1032,7 @@ func _draw() -> void:
 	items.append([ppos.y, 3, null])
 	items.sort_custom(func(a, b): return a[0] < b[0])
 	for a in afterimages:
-		_spr("player", a["pos"] + Vector2(0, 6), a["flip"], false, Color(0.5, 0.7, 1.0, a["life"] / 0.18 * 0.5))
+		_spr(a.get("spr", "player"), a["pos"] + Vector2(0, 6), a["flip"], false, Color(0.5, 0.7, 1.0, a["life"] / 0.18 * 0.5))
 	for it in items:
 		match it[1]:
 			0: _draw_chest(it[2])
@@ -1076,34 +1076,63 @@ func _draw() -> void:
 		if sp2.distance_to(ppos) > lr * 0.7:
 			draw_arc(sp2, 9.0 + sin(time * 3.0) * 1.5, 0, TAU, 24, Color(0.4, 1.0, 0.6, 0.6), 1.2)
 
+## 向き（pface）から4方向を決める: 0=下 1=上 2=横（右、左は反転）
+func player_dir() -> int:
+	if absf(pface.x) >= absf(pface.y) * 0.9:
+		return 2
+	return 1 if pface.y < 0.0 else 0
+
+func player_sprite() -> String:
+	match player_dir():
+		1: return "player_up"
+		2: return "player_side2" if pvel_vis.length() > 5.0 and fmod(walk_anim, PI) > PI * 0.5 else "player_side"
+	return "player"
+
 func _draw_player() -> void:
 	if hide_player:
 		return
+	var spr := player_sprite()
+	var flip := pface.x < -0.1 and player_dir() == 2
 	if not alive:
 		var k := clampf(dead_t / 0.8, 0.0, 1.0)
 		_shadow(ppos + Vector2(0, 4), 5.0)
-		draw_set_transform(ppos + Vector2(0, 4), k * PI * 0.5, Vector2.ONE)
-		draw_texture(Art.tex("player"), Vector2(-8, -16), Color(1, 0.5, 0.5, 1.0 - k * 0.3))
+		draw_set_transform(ppos + Vector2(0, 4), k * PI * 0.5, Vector2(-1.0 if flip else 1.0, 1.0))
+		draw_texture(Art.tex(spr), Vector2(-8, -16), Color(1, 0.5, 0.5, 1.0 - k * 0.3))
 		draw_set_transform(Vector2.ZERO)
 		return
 	_shadow(ppos + Vector2(0, 4), 5.5)
 	var blink := iframes > 0.0 and roll_t <= 0.0 and fmod(time, 0.12) < 0.06
 	var bob := absf(sin(walk_anim)) * 1.5 if pvel_vis.length() > 5.0 else 0.0
-	var flip := pface.x < -0.1
 	var p := ppos + Vector2(0, 6 - bob)
 	if roll_t > 0.0:
-		# 回転して転がる
+		# 進行方向へ回転して転がる
 		var k2 := 1.0 - roll_t / 0.24
-		draw_set_transform(ppos + Vector2(0, 0), (k2 * TAU) * (-1.0 if flip else 1.0), Vector2(0.9, 0.9))
-		draw_texture(Art.tex("player"), Vector2(-8, -8), Color(0.85, 0.95, 1.0))
+		var spin := k2 * TAU * (-1.0 if pface.x < 0.0 else 1.0)
+		draw_set_transform(ppos + Vector2(0, 0), spin, Vector2(-0.9 if flip else 0.9, 0.9))
+		draw_texture(Art.tex(spr), Vector2(-8, -8), Color(0.85, 0.95, 1.0))
 		draw_set_transform(Vector2.ZERO)
 		return
-	# 剣（構え）
-	if swing_t <= 0.0:
-		var hand := ppos + Vector2(4.0 * (-1.0 if flip else 1.0), 1.0)
-		_draw_sword(hand, pface.angle() * 0.3 + (PI * 0.75 if flip else PI * 0.25) - PI * 0.5, 0.8)
+	# 剣（構え）: 向きに合わせて持ち手と角度を変える。上向きは体の後ろ
+	var dir := player_dir()
+	var hold_pos := ppos
+	var hold_ang := 0.0
+	match dir:
+		0:
+			hold_pos = ppos + Vector2(-5.0, 1.0 - bob)
+			hold_ang = PI * 0.62
+		1:
+			hold_pos = ppos + Vector2(5.0, -1.0 - bob)
+			hold_ang = -PI * 0.42
+		2:
+			var sx := -1.0 if flip else 1.0
+			hold_pos = ppos + Vector2(3.0 * sx, 1.0 - bob)
+			hold_ang = Vector2(sx, 0.75).angle()
+	if swing_t <= 0.0 and dir == 1:
+		_draw_sword(hold_pos, hold_ang, 0.8)
 	if not blink:
-		_spr("player", p, flip, pflash > 0.0)
+		_spr(spr, p, flip, pflash > 0.0)
+	if swing_t <= 0.0 and dir != 1:
+		_draw_sword(hold_pos, hold_ang, 0.8)
 	if swing_t > 0.0:
 		var s: Dictionary = slashes[-1] if slashes.size() > 0 else {}
 		if not s.is_empty():

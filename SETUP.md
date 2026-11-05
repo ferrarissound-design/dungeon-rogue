@@ -76,6 +76,7 @@ bash tools/record_video.sh
 | `--start-floor=N` | N階から開始 |
 | `--gentest=N` | Nシード×5階のマップ生成検証 |
 | `--touchtest` | タッチ操作の自動テスト（ウィンドウ表示が必要） |
+| `--facingtest` | 主人公の向きの自動テスト（`--shots` で out/facing_*.png） |
 | `--shots` / `--shot-dir=パス` | 各場面のスクリーンショットを保存（既定 out/） |
 | `--touchui` | PCでもタッチ操作ボタンを表示（撮影用） |
 
